@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Farmgate SG – Tạo chứng từ xuất khẩu</title>
+<style>
+:root{--g:#1f6b45;--g2:#e8f3ec;--line:#d9dee3;--bg:#f6f7f8;--warn:#fff4cc;--err:#b3261e}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 -apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:#1c2229}
+header{background:var(--g);color:#fff;padding:14px 24px;font-size:18px;font-weight:600}
+main{max-width:980px;margin:20px auto;padding:0 16px 60px}
+section{background:#fff;border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin-bottom:16px}
+h2{margin:0 0 12px;font-size:16px}
+h2 span{display:inline-block;width:24px;height:24px;line-height:24px;text-align:center;border-radius:50%;background:var(--g);color:#fff;font-size:13px;margin-right:8px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px 14px}
+label{display:block;font-size:12.5px;color:#55616d;margin-bottom:3px}
+input,select{width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:6px;font:inherit;background:#fff}
+input.warn{background:var(--warn);border-color:#e0b800}
+button{font:inherit;border:0;border-radius:7px;padding:9px 16px;cursor:pointer;background:var(--g);color:#fff;font-weight:600}
+button.sec{background:var(--g2);color:var(--g)}
+button:disabled{opacity:.5;cursor:wait}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;align-items:center}
+.hint{font-size:12.5px;color:#68737d}
+fieldset{border:1px solid var(--line);border-radius:8px;margin:14px 0 0;padding:10px 14px 14px}
+legend{font-weight:600;padding:0 6px;font-size:14px}
+table{border-collapse:collapse;width:100%}
+td,th{padding:4px 6px;border-bottom:1px solid var(--line);font-size:13.5px;text-align:left}
+td input{padding:5px 7px}
+.msg{padding:10px 12px;border-radius:7px;margin-top:12px;font-size:14px}
+.msg.err{background:#fdecea;color:var(--err)}
+.msg.warn{background:var(--warn)}
+.msg.ok{background:var(--g2)}
+ul{margin:6px 0 0 18px;padding:0}
+.hide{display:none}
+.tot{display:flex;gap:22px;flex-wrap:wrap;margin-top:8px}
+.tot b{display:block;font-size:17px}
+</style>
+</head>
+<body>
+<header>Farmgate SG – Tạo chứng từ xuất khẩu</header>
+<main>
+
+<section>
+  <h2><span>1</span>Thông tin lô và tài liệu</h2>
+  <div class="grid">
+    <div><label>Mã OP</label><input id="op" placeholder="OP01943"></div>
+    <div><label>Mã NCC (trong sheet Parties)</label><input id="sup" placeholder="HP"></div>
+    <div><label>Mã Buyer</label><input id="buy" placeholder="JT"></div>
+    <div><label>Ngày đóng hàng</label><input id="stuff" type="date"></div>
+  </div>
+  <div class="grid" style="margin-top:12px">
+    <div><label>Hợp đồng mua (NCC)</label><input id="f_purchase" type="file" accept=".docx,.pdf,.png,.jpg,.jpeg,.xlsx,.txt"></div>
+    <div><label>Hợp đồng bán (Buyer)</label><input id="f_sales" type="file" accept=".docx,.pdf,.png,.jpg,.jpeg,.xlsx,.txt"></div>
+    <div><label>Booking confirmation</label><input id="f_booking" type="file" accept=".docx,.pdf,.png,.jpg,.jpeg,.xlsx,.txt"></div>
+    <div><label>master.xlsx của anh (bỏ trống = dùng bản mẫu)</label><input id="f_master" type="file" accept=".xlsx"></div>
+  </div>
+  <div class="row">
+    <button id="bExtract">Đọc bằng AI</button>
+    <button id="bManual" class="sec">Nhập tay</button>
+    <a href="/api/master_default" class="hint">Tải master.xlsx mẫu</a>
+  </div>
+  <div id="m1"></div>
+</section>
+
+<section id="s2" class="hide">
+  <h2><span>2</span>Kiểm tra và sửa dữ liệu</h2>
+  <div class="hint">Ô màu vàng là chỗ AI không chắc. Ô để trống = giữ nguyên dữ liệu đang có trong master.</div>
+  <div id="unc"></div>
+  <div id="form"></div>
+  <fieldset><legend>Dòng hàng</legend>
+    <table id="lines"><thead><tr><th>Mã SP</th><th>Số carton</th><th>Giá mua USD/kg</th><th>Giá bán USD/kg</th><th></th></tr></thead><tbody></tbody></table>
+    <div class="row"><button class="sec" id="addLine">+ Thêm dòng</button></div>
+  </fieldset>
+  <div class="row">
+    <button id="bCheck" class="sec">Kiểm tra</button>
+    <button id="bGen">Tạo chứng từ và tải về</button>
+  </div>
+  <div id="m2"></div>
+</section>
+</main>
+
+<script>
+const INCO=["FOB","CFR","CIF","CIP","EXW","FCA","DAP"],PAY=["DEPOSIT_BALANCE_ON_DOCS","DEPOSIT_BALANCE_ON_ARRIVAL","DAYS_FROM_BL"];
+const GROUPS={
+ purchase_contract:["Hợp đồng mua (NCC)",[["seq","Số thứ tự HĐ","number"],["date","Ngày HĐ","date"],["incoterm","Incoterm","sel",INCO],["incoterm_place","Nơi giao hàng","text"],["pay_type","Điều khoản thanh toán","sel",PAY],["deposit_pct","Tỷ lệ cọc (%)","pct"],["etd_text","Điều khoản ETD","text"],["pod","POD trong HĐ","text"],["surveyor_cert","Surveyor certificate","sel",["YES","NO"]]]],
+ sales_contract:["Hợp đồng bán (Buyer)",[["seq","Số thứ tự HĐ","number"],["date","Ngày HĐ","date"],["incoterm","Incoterm","sel",INCO],["incoterm_place","Nơi giao hàng","text"],["pay_type","Điều khoản thanh toán","sel",PAY],["pay_days","Số ngày kể từ B/L","number"],["deposit_pct","Tỷ lệ cọc (%)","pct"],["delivery_period","Thời gian giao","text"],["loading_port","Cảng xếp","text"],["place_of_delivery","Nơi giao","text"],["valid_until","Hiệu lực đến","text"],["certificates","Certificates","text"],["preservation","Preservation","text"],["other","Other","text"]]],
+ booking:["Booking",[["vessel_voyage","Tàu / chuyến","text"],["booking_no","Số booking","text"],["etd","ETD","date"],["port_of_loading","Cảng xếp (POL)","text"],["place_of_delivery","Nơi giao","text"],["port_of_discharge","Cảng dỡ (POD)","text"],["container_no","Số container","text"],["seal_no","Số seal","text"]]]
+};
+const $=id=>document.getElementById(id);
+let state={};
+
+function show(el,cls,html){el.innerHTML=html?`<div class="msg ${cls}">${html}</div>`:""}
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function ul(a){return "<ul>"+a.map(x=>"<li>"+esc(x)+"</li>").join("")+"</ul>"}
+
+function field(g,[k,label,type,opts],val,unc){
+  const id=`f_${g}_${k}`;let v=val==null?"":val;
+  if(type==="pct"&&v!=="")v=Math.round(v*10000)/100;
+  const warn=unc.some(u=>u.includes(k)&&(u.includes(g)||!u.includes("."))||u===`${g}.${k}`)?" warn":"";
+  let inp;
+  if(type==="sel")inp=`<select id="${id}" class="${warn}"><option value=""></option>${opts.map(o=>`<option ${o===v?"selected":""}>${o}</option>`).join("")}</select>`;
+  else inp=`<input id="${id}" class="${warn}" type="${type==="pct"?"number":type}" step="any" value="${esc(v)}">`;
+  return `<div><label>${label}</label>${inp}</div>`;
+}
+function render(data){
+  state=data;const unc=data.uncertain_fields||[];
+  $("unc").innerHTML=unc.length?`<div class="msg warn"><b>AI không chắc:</b>${ul(unc)}</div>`:"";
+  $("form").innerHTML=Object.entries(GROUPS).map(([g,[title,fs]])=>`<fieldset><legend>${title}</legend><div class="grid">${fs.map(f=>field(g,f,(data[g]||{})[f[0]],unc)).join("")}</div></fieldset>`).join("");
+  const tb=$("lines").tBodies[0];tb.innerHTML="";
+  (data.lines&&data.lines.length?data.lines:[{}]).forEach(addLine);
+  $("s2").classList.remove("hide");$("s2").scrollIntoView({behavior:"smooth"});
+}
+function addLine(l){
+  l=l||{};const tr=document.createElement("tr");
+  tr.innerHTML=`<td><input class="lp" value="${esc(l.product_code||"")}"></td><td><input class="lc" type="number" value="${l.cartons??""}"></td><td><input class="lb" type="number" step="any" value="${l.buy_price_usd_kg??""}"></td><td><input class="ls" type="number" step="any" value="${l.sell_price_usd_kg??""}"></td><td><button class="sec" onclick="this.closest('tr').remove()">Xoá</button></td>`;
+  $("lines").tBodies[0].appendChild(tr);
+}
+$("addLine").onclick=()=>addLine();
+function collect(){
+  const d={op_code:$("op").value.trim(),supplier_code:$("sup").value.trim()||null,buyer_code:$("buy").value.trim()||null,stuffing_date:$("stuff").value||null,
+    uncertain_fields:state.uncertain_fields||[],evidence:state.evidence||null,supplier:state.supplier||null,buyer:state.buyer||null};
+  for(const [g,[,fs]] of Object.entries(GROUPS)){
+    d[g]={};
+    for(const [k,,type] of fs){
+      let v=$(`f_${g}_${k}`).value.trim();
+      if(v==="")v=null;else if(type==="number")v=Number(v);else if(type==="pct")v=Number(v)/100;
+      d[g][k]=v;
+    }
+  }
+  d.lines=[...$("lines").tBodies[0].rows].map(r=>{
+    const n=c=>r.querySelector(c).value===""?null:Number(r.querySelector(c).value);
+    return {product_code:r.querySelector(".lp").value.trim(),cartons:n(".lc"),buy_price_usd_kg:n(".lb"),sell_price_usd_kg:n(".ls")};
+  }).filter(l=>l.product_code);
+  return d;
+}
+function formBase(){
+  const fd=new FormData();const m=$("f_master").files[0];if(m)fd.append("master",m);return fd;
+}
+async function post(url,fd){
+  const r=await fetch(url,{method:"POST",body:fd});
+  if(!r.ok){let t;try{t=(await r.json()).error}catch(e){t=await r.text()}throw new Error(t||r.status)}
+  return r;
+}
+$("bManual").onclick=()=>{if(!$("op").value.trim())return show($("m1"),"err","Nhập mã OP trước.");show($("m1"),"","");render({lines:[{}],purchase_contract:{},sales_contract:{},booking:{}})};
+$("bExtract").onclick=async()=>{
+  const b=$("bExtract");
+  if(!$("op").value.trim())return show($("m1"),"err","Nhập mã OP trước.");
+  const fd=formBase();
+  fd.append("op_code",$("op").value.trim());fd.append("supplier",$("sup").value.trim());fd.append("buyer",$("buy").value.trim());
+  const s=$("stuff").value;if(s){const [y,m,d]=s.split("-");fd.append("stuffing",`${d}/${m}/${y}`)}
+  let n=0;for(const k of ["purchase","sales","booking"]){const f=$("f_"+k).files[0];if(f){fd.append(k,f);n++}}
+  if(!n)return show($("m1"),"err","Chọn ít nhất một file hợp đồng/booking, hoặc bấm Nhập tay.");
+  b.disabled=true;b.textContent="AI đang đọc… (30–60 giây)";show($("m1"),"","");
+  try{const r=await (await post("/api/extract",fd)).json();
+    const d=r.data;$("sup").value=d.supplier_code||$("sup").value;$("buy").value=d.buyer_code||$("buy").value;
+    render(d);show($("m1"),"ok","Đã đọc xong. Kiểm tra lại dữ liệu ở bước 2.");
+  }catch(e){show($("m1"),"err",esc(e.message))}
+  b.disabled=false;b.textContent="Đọc bằng AI";
+};
+async function payload(){
+  const d=collect();if(!d.op_code)throw new Error("Thiếu mã OP");
+  if(!d.stuffing_date)throw new Error("Chưa nhập ngày đóng hàng (bước 1)");
+  const fd=formBase();fd.append("data",JSON.stringify(d));return fd;
+}
+$("bCheck").onclick=async()=>{
+  try{const r=await (await post("/api/check",await payload())).json();
+    let h=`<b>Sẽ tạo ${r.made.length} file.</b><div class="tot"><div>Carton<b>${r.totals.cartons}</b></div><div>Net kg<b>${r.totals.net_kg}</b></div><div>Mua USD<b>${r.totals.buy}</b></div><div>Bán USD<b>${r.totals.sell}</b></div><div>Lãi gộp USD<b>${r.totals.margin}</b></div></div>`;
+    if(r.skipped.length)h+="<br><b>Bỏ qua:</b>"+ul(r.skipped);
+    if(r.warnings.length)h+="<br><b>Cần kiểm tra:</b>"+ul(r.warnings);
+    show($("m2"),r.skipped.length||r.warnings.length?"warn":"ok",h);
+  }catch(e){show($("m2"),"err",esc(e.message))}
+};
+$("bGen").onclick=async()=>{
+  const b=$("bGen");b.disabled=true;
+  try{const r=await post("/api/generate",await payload());const blob=await r.blob();
+    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${$("op").value.trim()}_chung_tu.zip`;a.click();
+    show($("m2"),"ok","Đã tải về. <b>Nhớ lưu file master.xlsx trong gói zip</b> và dùng bản đó cho lô sau (để số thứ tự hợp đồng đúng).");
+  }catch(e){show($("m2"),"err",esc(e.message))}
+  b.disabled=false;
+};
+</script>
+</body>
+</html>

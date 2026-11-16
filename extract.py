@@ -113,7 +113,7 @@ def parse_date(s):
             return dt.datetime.strptime(s, fmt).strftime("%Y-%m-%d")
         except ValueError:
             pass
-    raise SystemExit(f"Ngày '{s}' sai định dạng (dùng dd/mm/yyyy)")
+    raise ValueError(f"Ngày '{s}' sai định dạng (dùng dd/mm/yyyy)")
 
 
 def build_request(a):
@@ -136,6 +136,25 @@ def build_request(a):
         "tool_choice": {"type": "tool", "name": "record_lot"},
         "messages": [{"role": "user", "content": content}],
     }
+
+
+def run_extraction(a, req=None):
+    """Gọi AI và trả về dict dữ liệu lô (đã gắn op_code, mã đối tác, ngày đóng hàng)."""
+    import anthropic
+    req = req or build_request(a)
+    resp = anthropic.Anthropic().messages.create(**req)
+    tool = next((b for b in resp.content if b.type == "tool_use"), None)
+    if tool is None:
+        raise RuntimeError("AI không trả về dữ liệu có cấu trúc. Thử lại hoặc kiểm tra tài liệu.")
+    data = dict(tool.input)
+    data["op_code"] = a.op_code
+    if a.supplier:
+        data["supplier_code"] = a.supplier
+    if a.buyer:
+        data["buyer_code"] = a.buyer
+    if a.stuffing:
+        data["stuffing_date"] = parse_date(a.stuffing)
+    return data
 
 
 def main():
@@ -166,19 +185,10 @@ def main():
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise SystemExit("Chưa có ANTHROPIC_API_KEY (export ANTHROPIC_API_KEY=sk-ant-...). "
                          "Hoặc dùng --dry-run để kiểm tra trước.")
-    import anthropic
-    resp = anthropic.Anthropic().messages.create(**req)
-    tool = next((b for b in resp.content if b.type == "tool_use"), None)
-    if tool is None:
-        raise SystemExit("AI không trả về dữ liệu có cấu trúc. Thử lại hoặc kiểm tra tài liệu.")
-    data = dict(tool.input)
-    data["op_code"] = a.op_code
-    if a.supplier:
-        data["supplier_code"] = a.supplier
-    if a.buyer:
-        data["buyer_code"] = a.buyer
-    if a.stuffing:
-        data["stuffing_date"] = parse_date(a.stuffing)
+    try:
+        data = run_extraction(a, req)
+    except (RuntimeError, ValueError) as ex:
+        raise SystemExit(str(ex))
     out = Path(a.out or f"lots/{a.op_code}.json")
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf8")

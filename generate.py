@@ -19,7 +19,7 @@ import common
 from xlsx_engine import render_workbook
 
 HERE = Path(__file__).parent
-TPL = HERE / "templates"
+TPL = HERE / "templates" if (HERE / "templates").is_dir() else HERE   # repo phẳng: mẫu nằm cùng thư mục
 
 
 def render_docx(tpl, out, ctx):
@@ -28,19 +28,10 @@ def render_docx(tpl, out, ctx):
     d.save(str(out))
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("op_code")
-    ap.add_argument("--master", default=str(HERE / "master.xlsx"))
-    ap.add_argument("--out", default=str(HERE / "output"))
-    a = ap.parse_args()
-
-    try:
-        ctx = common.build_context(a.master, a.op_code)
-    except common.MasterError as e:
-        sys.exit(f"LỖI DỮ LIỆU: {e}")
-
-    out = Path(a.out) / a.op_code
+def generate_lot(master, op_code, out_root):
+    """Sinh chứng từ của 1 lô. Trả về (made, skipped, ctx). Ném common.MasterError nếu dữ liệu thiếu."""
+    ctx = common.build_context(master, op_code)
+    out = Path(out_root) / op_code
     out.mkdir(parents=True, exist_ok=True)
     sup, buy = ctx["sup"]["code"], ctx["buy"]["code"]
     pay = ctx["pay"]
@@ -57,24 +48,37 @@ def main():
     sales_ok = "unsupported_sales" not in pay
     post_ok = ctx["has_exe"]
     no_exe = "chưa có ngày đóng hàng trong sheet Execution"
+    op = op_code
 
-    job(f"{a.op_code} SC {sup} - FGS.docx", purchase_ok,
+    job(f"{op} SC {sup} - FGS.docx", purchase_ok,
         f"chưa có mẫu cho điều khoản thanh toán phía NCC ({pay.get('unsupported_purchase')})",
-        lambda: render_docx(TPL / "Hop_dong_mua_NCC.docx", out / f"{a.op_code} SC {sup} - FGS.docx", ctx))
-    job(f"{a.op_code} SC FGS - {buy}.docx",
+        lambda: render_docx(TPL / "Hop_dong_mua_NCC.docx", out / f"{op} SC {sup} - FGS.docx", ctx))
+    job(f"{op} SC FGS - {buy}.docx",
         sales_ok and "unsupported_sales_contract" not in pay,
         f"chưa có mẫu hợp đồng cho điều khoản thanh toán phía Buyer ({pay.get('unsupported_sales') or pay.get('unsupported_sales_contract')})",
-        lambda: render_docx(TPL / "Hop_dong_ban_Buyer.docx", out / f"{a.op_code} SC FGS - {buy}.docx", ctx))
-    job(f"{a.op_code} PL + CI + SI {sup}-FGS.xlsx", purchase_ok and post_ok,
+        lambda: render_docx(TPL / "Hop_dong_ban_Buyer.docx", out / f"{op} SC FGS - {buy}.docx", ctx))
+    job(f"{op} PL + CI + SI {sup}-FGS.xlsx", purchase_ok and post_ok,
         no_exe if not post_ok else "chưa có mẫu điều khoản thanh toán phía NCC",
-        lambda: render_workbook(TPL / "PL_CI_SI_NCC.xlsx", out / f"{a.op_code} PL + CI + SI {sup}-FGS.xlsx", ctx))
-    job(f"{a.op_code} INV + PKL - {buy} FGS.xlsx", sales_ok and post_ok,
+        lambda: render_workbook(TPL / "PL_CI_SI_NCC.xlsx", out / f"{op} PL + CI + SI {sup}-FGS.xlsx", ctx))
+    job(f"{op} INV + PKL - {buy} FGS.xlsx", sales_ok and post_ok,
         no_exe if not post_ok else "chưa có mẫu điều khoản thanh toán phía Buyer",
-        lambda: render_workbook(TPL / "PL_CI_Buyer.xlsx", out / f"{a.op_code} INV + PKL - {buy} FGS.xlsx", ctx))
-    job(f"{a.op_code} Proof of delivery {sup}.docx", post_ok, no_exe,
-        lambda: render_docx(TPL / "PoD_NCC.docx", out / f"{a.op_code} Proof of delivery {sup}.docx", ctx))
+        lambda: render_workbook(TPL / "PL_CI_Buyer.xlsx", out / f"{op} INV + PKL - {buy} FGS.xlsx", ctx))
+    job(f"{op} Proof of delivery {sup}.docx", post_ok, no_exe,
+        lambda: render_docx(TPL / "PoD_NCC.docx", out / f"{op} Proof of delivery {sup}.docx", ctx))
+    return made, skipped, ctx
 
-    print(f"Đã tạo trong {out}:")
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("op_code")
+    ap.add_argument("--master", default=str(HERE / "master.xlsx"))
+    ap.add_argument("--out", default=str(HERE / "output"))
+    a = ap.parse_args()
+    try:
+        made, skipped, ctx = generate_lot(a.master, a.op_code, a.out)
+    except common.MasterError as e:
+        sys.exit(f"LỖI DỮ LIỆU: {e}")
+    print(f"Đã tạo trong {Path(a.out) / a.op_code}:")
     for m in made:
         print("  +", m)
     for s_ in skipped:
